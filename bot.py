@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # إعدادات API
 DEEPSEEK_API_URL = "https://vetrex.x10.mx/api/deepseek_chat.php"
-TELEGRAM_TOKEN = "8543864168:AAG7IGqJ0HAs3PZnxgw97fUgUrWygR3uNRY"
+TELEGRAM_TOKEN = "8543864168:AAHLdQAGzYLRFtf_hHv8B7E6mpgMRwrU1W4"
 ADMIN_ID = 6689435577
 
 # تهيئة البوت
