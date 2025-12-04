@@ -1,121 +1,0 @@
-
-*الطول الإجمالي:* {len(new_prompt)} حرف
-
-*الرجاء الموافقة أو الرفض:*"""
-    
-    # إرسال الرسالة إلى المدير مع أزرار الموافقة/الرفض
-    bot.send_message(
-        ADMIN_ID,
-        approval_message,
-        parse_mode='Markdown',
-        reply_markup=create_approval_keyboard(request_id, user_id, channel_id)
-    )
-    
-    # إرسال تأكيد للمستخدم
-    bot.send_message(
-        message.chat.id,
-        f"✅ *تم إرسال طلب الموافقة*\n\n"
-        f"تم إرسال طلب تغيير شخصية القناة {channel_name} إلى المدير للموافقة.\n"
-        f"*رقم الطلب:* {request_id}\n\n"
-        f"سيتم إعلامك بالقرار قريباً.",
-        parse_mode='Markdown',
-        reply_markup=create_main_menu()
-    )
-    
-    user_states[message.chat.id] = "main_menu"
-
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "🚫 ليس لديك صلاحية للتفاعل مع هذا البوت.")
-        return
-    
-    # إذا كان المستخدم في حالة انتظار اسم القناة
-    if user_states.get(message.chat.id) == "awaiting_channel":
-        process_channel_username(message)
-    else:
-        # إعادة عرض القائمة الرئيسية
-        user_states[message.chat.id] = "main_menu"
-        bot.send_message(message.chat.id, 
-                        "🏠 *القائمة الرئيسية*\n\nاختر أحد الخيارات:",
-                        parse_mode='Markdown',
-                        reply_markup=create_main_menu())
-
-# دالة لاختبار الاتصال بـ API
-def test_api_connection():
-    """اختبار الاتصال بـ META AI API"""
-    try:
-        logger.info("جاري اختبار الاتصال بـ API...")
-        response = requests.get(META_API_URL, timeout=10)
-        logger.info(f"نتيجة اختبار API: {response.status_code}")
-        return response.status_code == 200
-    except Exception as e:
-        logger.error(f"فشل اختبار الاتصال بـ API: {e}")
-        return False
-
-# تشغيل البوت
-if __name__ == "__main__":
-    logger.info("=" * 50)
-    logger.info("🚀 بدء تشغيل بوت نشر الشعر العربي الساخر من مصادر حقيقية")
-    logger.info("=" * 50)
-    
-    # اختبار الاتصال بالإنترنت وAPI
-    try:
-        import socket
-        socket.create_connection(("8.8.8.8", 53), timeout=5)
-        logger.info("✅ الاتصال بالإنترنت نشط")
-        
-        if test_api_connection():
-            logger.info("✅ الاتصال بـ API نشط")
-        else:
-            logger.warning("⚠️  قد يكون هناك مشكلة في الاتصال بـ API")
-    except Exception as e:
-        logger.error(f"❌ لا يوجد اتصال بالإنترنت: {e}")
-    
-    # تحميل البيانات
-    load_data()
-    
-    # تشغيل جدولة النشر في خيط منفصل
-    try:
-        scheduler_thread = threading.Thread(target=schedule_posts, daemon=True)
-        scheduler_thread.start()
-        logger.info("✅ تم بدء خيط جدولة النشر")
-    except Exception as e:
-        logger.error(f"❌ فشل بدء خيط الجدولة: {e}")
-    
-    # عرض معلومات البوت
-    logger.info(f"📅 القنوات المضافة: {len(channels)}")
-    logger.info(f"📝 القصائد المنشورة: {len(posted_poems)}")
-    logger.info(f"🔗 API المستخدم: {META_API_URL}")
-    logger.info(f"👤 المدير: {ADMIN_ID}")
-    
-    if channels:
-        logger.info("📋 القنوات المضافة:")
-        for idx, (channel_id, data) in enumerate(channels.items(), 1):
-            has_custom = "✓" if "custom_prompt" in data and data["custom_prompt"] else "✗"
-            logger.info(f"  {idx}. {data['username']} [شخصية مخصصة: {has_custom}]")
-    
-    logger.info("=" * 50)
-    logger.info("✅ البوت يعمل الآن وجاهز للاستخدام")
-    logger.info("📚 جميع القصائد من مصادر أدبية حقيقية")
-    logger.info("🎭 نظام الشخصيات المخصصة نشط")
-    logger.info("=" * 50)
-    
-    # تشغيل البوت مع إعادة المحاولة في حالة الفشل
-    retry_count = 0
-    max_retries = 5
-    
-    while retry_count < max_retries:
-        try:
-            logger.info(f"محاولة تشغيل البوت (المحاولة {retry_count + 1}/{max_retries})...")
-            bot.infinity_polling(timeout=30, long_polling_timeout=5)
-            break
-        except Exception as e:
-            retry_count += 1
-            logger.error(f"❌ خطأ في تشغيل البوت (المحاولة {retry_count}): {e}")
-            if retry_count < max_retries:
-                wait_time = retry_count * 10
-                logger.info(f"⏳ الانتظار {wait_time} ثانية قبل إعادة المحاولة...")
-                time.sleep(wait_time)
-            else:
-                logger.error(f"❌ فشل جميع محاولات تشغيل البوت ({max_retries} محاولات)")
