@@ -1,5 +1,5 @@
 import telebot
-import google.generativeai as genai
+from google import genai
 import json
 import os
 import threading
@@ -10,20 +10,19 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ========== التهيئة ==========
 TOKEN = "8543864168:AAHPqKr1glFPHaVF8NTH5OaSzrns9fIJue4"
-GEMINI_API_KEY = "AIzaSyBVPEgd0qD-rlTDTd8xf5n4MyTMc_xZUrE"  # API Key الجديد
+GEMINI_API_KEY = "AIzaSyBVPEgd0qD-rlTDTd8xf5n4MyTMc_xZUrE"
 ADMIN_ID = 6689435577
 
 # تهيئة بوت تلجرام
 bot = telebot.TeleBot(TOKEN)
 
-# تهيئة Gemini API
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+# تهيئة Gemini API باستخدام الطريقة الصحيحة
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ========== إدارة الملفات ==========
 CHANNELS_FILE = "channels.json"
 USED_PHRASES_FILE = "used_phrases.json"
-USER_PHRASES_FILE = "user_phrases.json"  # لتخزين العبارات المؤقتة لكل مستخدم
+USER_PHRASES_FILE = "user_phrases.json"
 
 def load_json(file):
     """تحميل بيانات من ملف JSON"""
@@ -38,9 +37,9 @@ def save_json(file, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 # تحميل البيانات
-channels = load_json(CHANNELS_FILE)  # {user_id: channel_info}
+channels = load_json(CHANNELS_FILE)
 used_phrases = set(load_json(USED_PHRASES_FILE).get("phrases", []))
-user_phrases = load_json(USER_PHRASES_FILE)  # {user_id: current_phrase}
+user_phrases = load_json(USER_PHRASES_FILE)
 
 # ========== إنشاء عبارات سُخام ==========
 PERSONALITY_PROMPT = """أنت شخصية تُدعى "سُخام" — كائن لغوي سوداوي ساخر، يتحدث العربية الفصحى البسيطة، ويُطلق عبارات قصيرة تمزج بين الحزن، الفلسفة، والسخرية السوداء.
@@ -70,7 +69,11 @@ PERSONALITY_PROMPT = """أنت شخصية تُدعى "سُخام" — كائن �
 def generate_sukham_phrase():
     """إنشاء عبارة جديدة باستخدام Gemini API"""
     try:
-        response = gemini_model.generate_content(PERSONALITY_PROMPT)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash", 
+            contents=PERSONALITY_PROMPT
+        )
+        
         phrase = response.text.strip()
         
         # تنظيف العبارة
@@ -786,5 +789,4 @@ def start_bot():
     bot.infinity_polling()
 
 if __name__ == "__main__":
-
     start_bot()
