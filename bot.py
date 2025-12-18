@@ -1,28 +1,25 @@
 import telebot
-from google import genai
 import json
 import os
 import threading
 import time
 import html
+import requests
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ========== التهيئة ==========
 TOKEN = "8543864168:AAHPqKr1glFPHaVF8NTH5OaSzrns9fIJue4"
-GEMINI_API_KEY = "AIzaSyBVPEgd0qD-rlTDTd8xf5n4MyTMc_xZUrE"
+COPILOT_API_URL = "https://vetrex.x10.mx/api/copilot_chat.php"
 ADMIN_ID = 6689435577
 
 # تهيئة بوت تلجرام
 bot = telebot.TeleBot(TOKEN)
 
-# تهيئة Gemini API باستخدام الطريقة الصحيحة
-client = genai.Client(api_key=GEMINI_API_KEY)
-
 # ========== إدارة الملفات ==========
 CHANNELS_FILE = "channels.json"
 USED_PHRASES_FILE = "used_phrases.json"
-USER_PHRASES_FILE = "user_phrases.json"
+USER_PHRASES_FILE = "user_phrases.json"  # لتخزين العبارات المؤقتة لكل مستخدم
 
 def load_json(file):
     """تحميل بيانات من ملف JSON"""
@@ -37,9 +34,9 @@ def save_json(file, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 # تحميل البيانات
-channels = load_json(CHANNELS_FILE)
+channels = load_json(CHANNELS_FILE)  # {user_id: channel_info}
 used_phrases = set(load_json(USED_PHRASES_FILE).get("phrases", []))
-user_phrases = load_json(USER_PHRASES_FILE)
+user_phrases = load_json(USER_PHRASES_FILE)  # {user_id: current_phrase}
 
 # ========== إنشاء عبارات سُخام ==========
 PERSONALITY_PROMPT = """أنت شخصية تُدعى "سُخام" — كائن لغوي سوداوي ساخر، يتحدث العربية الفصحى البسيطة، ويُطلق عبارات قصيرة تمزج بين الحزن، الفلسفة، والسخرية السوداء.
@@ -67,16 +64,30 @@ PERSONALITY_PROMPT = """أنت شخصية تُدعى "سُخام" — كائن �
 أنشئ عبارة واحدة فقط بأسلوب "سُخام"، ولا تكتب أي شرح إضافي."""
 
 def generate_sukham_phrase():
-    """إنشاء عبارة جديدة باستخدام Gemini API"""
+    """إنشاء عبارة جديدة باستخدام Copilot API"""
     try:
-        response = client.models.generate_content(
-            model="gemini-1.5-flash", 
-            contents=PERSONALITY_PROMPT
+        # إرسال طلب POST إلى Copilot API
+        response = requests.post(
+            COPILOT_API_URL,
+            json={"text": PERSONALITY_PROMPT},
+            headers={"Content-Type": "application/json"},
+            timeout=30
         )
         
-        phrase = response.text.strip()
+        if response.status_code == 200:
+            phrase = response.text.strip()
+        else:
+            # إذا فشل POST، نجرب GET
+            get_url = f"{COPILOT_API_URL}?text={requests.utils.quote(PERSONALITY_PROMPT)}"
+            response = requests.get(get_url, timeout=30)
+            phrase = response.text.strip() if response.status_code == 200 else ""
+        
+        # إذا لم نحصل على رد، نستخدم عبارة افتراضية
+        if not phrase:
+            return "أحيانًا تتعطل الكلمات كما تتعطل القلوب."
         
         # تنظيف العبارة
+        phrase = phrase.strip()
         if phrase.startswith('"') and phrase.endswith('"'):
             phrase = phrase[1:-1]
         
@@ -92,6 +103,10 @@ def generate_sukham_phrase():
             phrase = " ".join(words[:25]) + "..."
         
         return phrase
+        
+    except requests.exceptions.Timeout:
+        print("تم انتهاء المهلة في الاتصال بـ Copilot API")
+        return "الوقت يمر سريعاً كالكلمات التي لم تُكتب."
     except Exception as e:
         print(f"خطأ في توليد العبارة: {e}")
         return "أحيانًا تتعطل الكلمات كما تتعطل القلوب."
@@ -774,7 +789,7 @@ def start_bot():
     print("=" * 50)
     print("🎭 بوت سُخام - النظام الجديد")
     print("=" * 50)
-    print(f"🔑 API Key الجديد: {GEMINI_API_KEY[:15]}...")
+    print(f"🌐 Copilot API: {COPILOT_API_URL}")
     print(f"👤 إجمالي المستخدمين: {len(channels)}")
     print(f"🗂️ العبارات المخزنة: {len(used_phrases)}")
     print(f"⏰ أوقات النشر: 6:00, 12:00, 18:00")
