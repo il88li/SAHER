@@ -9,9 +9,8 @@ import requests
 import hashlib
 from collections import Counter
 from datetime import datetime, timedelta
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
 from difflib import SequenceMatcher
-import schedule
 
 # ========== التهيئة ==========
 TOKEN = "8543864168:AAHPqKr1glFPHaVF8NTH5OaSzrns9fIJue4"
@@ -579,6 +578,37 @@ def create_main_keyboard(user_id=None):
     
     return keyboard
 
+def create_channel_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    keyboard.add(
+        InlineKeyboardButton("➕ إضافة قناة", callback_data="add_channel"),
+        InlineKeyboardButton("🗑️ حذف قناتي", callback_data="delete_channel"),
+        InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+    )
+    
+    return keyboard
+
+def create_phrase_keyboard(user_id=None):
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    has_channel = str(user_id) in channels if user_id else False
+    
+    buttons = [
+        InlineKeyboardButton("🔄 توليد أخرى", callback_data="generate_phrase"),
+        InlineKeyboardButton("📤 النشر في قناتي", callback_data="publish_to_channel"),
+        InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+    ]
+    
+    if has_channel:
+        keyboard.add(buttons[0], buttons[1])
+    else:
+        keyboard.add(buttons[0])
+    
+    keyboard.add(buttons[2])
+    
+    return keyboard
+
 # ========== التحقق من الاشتراك ==========
 def check_subscription(user_id):
     """التحقق من اشتراك المستخدم في القناة الإجبارية"""
@@ -715,26 +745,559 @@ def handle_set_ads_count(call):
     
     bot.answer_callback_query(call.id, "سيتم إضافة هذه الميزة قريبًا")
 
-# ========== وظائف البوت الأساسية (نفس الكود السابق) ==========
-# [أبقى على نفس وظائف handle_my_channel, handle_generate_phrase, handle_publish_to_channel, 
-# handle_add_channel_start, process_add_channel, handle_delete_channel, handle_help, 
-# handle_stats, handle_back_to_main, handle_cancel, publish_phrase_to_channel, 
-# handle_force_publish - مع تعديلات بسيطة لتعمل مع النظام الجديد]
-
-# أضف هذه الدوال كما هي من الكود الأصلي مع تعديل بسيط:
+# ========== وظائف البوت الأساسية ==========
 def handle_my_channel(call):
-    # نفس الكود مع تعديل بسيط للرسائل
-    pass
+    user_id = call.from_user.id
+    user_str = str(user_id)
+    
+    if user_str in channels:
+        channel_info = channels[user_str]
+        
+        text = f"""
+        📊 *قناتك الخاصة*
+        
+        *اسم القناة:* {html.escape(channel_info['title'])}
+        *المعرف:* `{channel_info['username']}`
+        *وقت الإضافة:* {channel_info['added_date']}
+        *آخر نشر:* {channel_info.get('last_post', 'لم ينشر بعد')}
+        
+        *النشر التلقائي:* ✅ مفعل
+        • 6:00 صباحًا
+        • 12:00 ظهرًا
+        • 18:00 مساءً
+        
+        *عدد العبارات المنشورة:* {channel_info.get('post_count', 0)}
+        """
+        
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            InlineKeyboardButton("🗑️ حذف القناة", callback_data="delete_channel"),
+            InlineKeyboardButton("🎲 توليد عبارة", callback_data="generate_phrase"),
+            InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=text,
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
+    else:
+        text = """
+        📭 *ليس لديك قناة مضافة*
+        
+        لم تقم بإضافة قناة بعد. يمكنك إضافة قناة واحدة فقط.
+        
+        *المتطلبات:*
+        1. القناة يجب أن تكون عامة
+        2. البوت يجب أن يكون مدير في القناة
+        
+        اضغط على الزر أدناه لإضافة قناتك.
+        """
+        
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(
+            InlineKeyboardButton("➕ إضافة قناتي", callback_data="add_channel"),
+            InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=text,
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
+    
+    bot.answer_callback_query(call.id)
 
 def handle_generate_phrase(call):
-    # نفس الكود
-    pass
+    user_id = call.from_user.id
+    user_str = str(user_id)
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text="🔄 *جاري توليد عبارة فريدة...*\n\nقد يستغرق هذا بضع ثوانٍ لضمان عدم التكرار.",
+        parse_mode='Markdown'
+    )
+    
+    phrase = generate_sukham_phrase()
+    
+    is_duplicate, reason = repetition_preventer.is_phrase_duplicate(phrase)
+    
+    if is_duplicate:
+        phrase += " [جديدة]"
+    
+    user_phrases[user_str] = phrase
+    save_json(USER_PHRASES_FILE, user_phrases)
+    
+    has_channel = user_str in channels
+    
+    text = f"""
+    🎲 *عبارة جديدة*
+    
+    "{phrase}"
+    
+    *معلومات الجودة:*
+    • تم التحقق من التكرار: ✅
+    • الطول: {len(phrase.split())} كلمة
+    • البصمة: {repetition_preventer.get_phrase_hash(phrase)[:8]}
+    
+    *يمكنك الآن:*
+    """
+    
+    if has_channel:
+        text += "• نشر هذه العبارة في قناتك مباشرة\n"
+    
+    text += "• توليد عبارة أخرى\n• الرجوع للقائمة الرئيسية"
+    
+    keyboard = create_phrase_keyboard(user_id)
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+    bot.answer_callback_query(call.id)
 
 def handle_publish_to_channel(call):
-    # نفس الكود
-    pass
+    user_id = call.from_user.id
+    user_str = str(user_id)
+    
+    if user_str not in channels:
+        bot.answer_callback_query(call.id, "ليس لديك قناة مضافة!")
+        return
+    
+    if user_str not in user_phrases:
+        bot.answer_callback_query(call.id, "ليس لديك عبارة مؤقتة! قم بتوليد عبارة أولاً.")
+        return
+    
+    channel_info = channels[user_str]
+    phrase = user_phrases[user_str]
+    
+    try:
+        is_duplicate, reason = repetition_preventer.is_phrase_duplicate(phrase)
+        
+        if is_duplicate:
+            warning_msg = f"⚠️ *تحذير:* هذه العبارة مشابهة لعبارة سابقة ({reason})\n\n"
+            warning_msg += f"*هل تريد النشر على أي حال؟*\n\nالعبارة: \"{phrase}\""
+            
+            keyboard = InlineKeyboardMarkup(row_width=2)
+            keyboard.add(
+                InlineKeyboardButton("✅ نعم، أنشر", callback_data=f"force_publish:{phrase}"),
+                InlineKeyboardButton("❌ لا، أعيد التوليد", callback_data="generate_phrase")
+            )
+            
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=warning_msg,
+                parse_mode='Markdown',
+                reply_markup=keyboard
+            )
+            bot.answer_callback_query(call.id, "تحذير: العبارة مكررة!")
+            return
+        
+        publish_phrase_to_channel(call, phrase)
+        
+    except Exception as e:
+        error_msg = f"""
+        ❌ *فشل النشر!*
+        
+        *الخطأ:* {html.escape(str(e))}
+        """
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=error_msg,
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🔄 المحاولة مرة أخرى", callback_data="publish_to_channel"),
+                InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+            )
+        )
+        bot.answer_callback_query(call.id, "فشل النشر!")
 
-# ... [بقية الدوال كما هي]
+def publish_phrase_to_channel(call, phrase):
+    user_id = call.from_user.id
+    user_str = str(user_id)
+    channel_info = channels[user_str]
+    
+    bot.send_message(channel_info['channel_id'], phrase)
+    
+    channels[user_str]['last_post'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    channels[user_str]['post_count'] = channels[user_str].get('post_count', 0) + 1
+    save_json(CHANNELS_FILE, channels)
+    
+    repetition_preventer.register_phrase(phrase)
+    
+    if user_str in user_phrases:
+        del user_phrases[user_str]
+        save_json(USER_PHRASES_FILE, user_phrases)
+    
+    text = f"""
+    ✅ *تم النشر بنجاح!*
+    
+    *القناة:* {html.escape(channel_info['title'])}
+    *الوقت:* {datetime.now().strftime("%H:%M:%S")}
+    *البصمة:* {repetition_preventer.get_phrase_hash(phrase)[:8]}
+    
+    *العبارة المنشورة:*
+    "{phrase}"
+    
+    تم تسجيل العبارة في نظام منع التكرار.
+    """
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("🎲 توليد أخرى", callback_data="generate_phrase"),
+            InlineKeyboardButton("📊 قناتي", callback_data="my_channel")
+        )
+    )
+    bot.answer_callback_query(call.id, "تم النشر بنجاح!")
+
+def handle_force_publish(call):
+    phrase = call.data.split(":", 1)[1]
+    publish_phrase_to_channel(call, phrase)
+
+def handle_add_channel_start(call):
+    user_id = call.from_user.id
+    user_str = str(user_id)
+    
+    if user_str in channels:
+        text = f"""
+        ⚠️ *لديك قناة مضافة بالفعل!*
+        
+        *قناتك الحالية:* {html.escape(channels[user_str]['title'])}
+        
+        يمكنك إضافة قناة واحدة فقط. إذا كنت ترغب بتغيير القناة، يجب حذف القناة الحالية أولاً.
+        """
+        
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(
+            InlineKeyboardButton("🗑️ حذف القناة الحالية", callback_data="delete_channel"),
+            InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=text,
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
+        bot.answer_callback_query(call.id, "لديك قناة بالفعل!")
+        return
+    
+    text = """
+    📤 *إضافة قناتك الخاصة*
+    
+    كل مستخدم يمكنه إضافة قناة واحدة فقط.
+    
+    *المتطلبات:*
+    1. القناة يجب أن تكون عامة
+    2. البوت يجب أن يكون مدير في القناة
+    3. المعرف يجب أن يبدأ ب @
+    
+    *مثال:* `@my_channel`
+    
+    أرسل معرف القناة الآن:
+    """
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        parse_mode='Markdown'
+    )
+    
+    msg = bot.send_message(call.message.chat.id, 
+                          "⬇️ أرسل معرف القناة الآن (أو /cancel للإلغاء):")
+    bot.register_next_step_handler(msg, process_add_channel, user_id)
+    
+    bot.answer_callback_query(call.id)
+
+def process_add_channel(message, user_id):
+    user_str = str(user_id)
+    
+    if message.text == '/cancel':
+        bot.send_message(
+            message.chat.id,
+            "تم إلغاء العملية.",
+            reply_markup=create_main_keyboard(user_id)
+        )
+        return
+    
+    username = message.text.strip()
+    
+    if not username.startswith('@'):
+        bot.send_message(
+            message.chat.id,
+            "❌ *خطأ:* المعرف يجب أن يبدأ ب @\n\nأرسل معرف القناة مرة أخرى أو /cancel للإلغاء.",
+            parse_mode='Markdown'
+        )
+        bot.register_next_step_handler(message, process_add_channel, user_id)
+        return
+    
+    try:
+        chat = bot.get_chat(username)
+        
+        bot_member = bot.get_chat_member(chat.id, bot.get_me().id)
+        if bot_member.status not in ['administrator', 'creator']:
+            bot.send_message(
+                message.chat.id,
+                "❌ *خطأ:* يجب أن أكون مديرًا في القناة أولاً.\n\nأضفني كمدير ثم حاول مرة أخرى.",
+                parse_mode='Markdown',
+                reply_markup=create_main_keyboard(user_id)
+            )
+            return
+        
+        channels[user_str] = {
+            "channel_id": chat.id,
+            "username": username,
+            "title": chat.title,
+            "added_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "post_count": 0,
+            "last_post": "لم ينشر بعد"
+        }
+        save_json(CHANNELS_FILE, channels)
+        
+        welcome_phrase = generate_sukham_phrase()
+        bot.send_message(chat.id, 
+                        f"🎭 *مرحبًا بك في عالم سُخام*\n\n{welcome_phrase}\n\nسيتم النشر التلقائي: 6ص، 12ظ، 6م",
+                        parse_mode='Markdown')
+        
+        repetition_preventer.register_phrase(welcome_phrase)
+        
+        success_msg = f"""
+        ✅ *تم إضافة قناتك بنجاح!*
+        
+        *اسم القناة:* {html.escape(chat.title)}
+        *المعرف:* `{username}`
+        *وقت الإضافة:* {datetime.now().strftime("%H:%M:%S")}
+        
+        *المميزات المفعّلة:*
+        ✓ نشر تلقائي مجدول
+        ✓ توليد عبارات فوري
+        ✓ نشر يدوي فوري
+        
+        *جرب الآن:* اضغط على "توليد عبارة" لإنشاء أول عبارة لك!
+        """
+        
+        bot.send_message(
+            message.chat.id,
+            success_msg,
+            parse_mode='Markdown',
+            reply_markup=create_main_keyboard(user_id)
+        )
+        
+    except Exception as e:
+        error_msg = f"""
+        ❌ *حدث خطأ!*
+        
+        *التفاصيل:* {html.escape(str(e))}
+        
+        *تأكد من:*
+        1. معرف القناة صحيح
+        2. القناة عامة (ليست خاصة)
+        3. البوت مدير في القناة
+        4. معرف القناة يبدأ ب @
+        """
+        bot.send_message(
+            message.chat.id,
+            error_msg,
+            parse_mode='Markdown',
+            reply_markup=create_main_keyboard(user_id)
+        )
+
+def handle_delete_channel(call):
+    user_id = call.from_user.id
+    user_str = str(user_id)
+    
+    if user_str not in channels:
+        bot.answer_callback_query(call.id, "ليس لديك قناة لحذفها!")
+        return
+    
+    channel_info = channels[user_str]
+    
+    del channels[user_str]
+    save_json(CHANNELS_FILE, channels)
+    
+    if user_str in user_phrases:
+        del user_phrases[user_str]
+        save_json(USER_PHRASES_FILE, user_phrases)
+    
+    text = f"""
+    ✅ *تم حذف قناتك بنجاح*
+    
+    *القناة المحذوفة:* {html.escape(channel_info['title'])}
+    *المعرف:* `{channel_info['username']}`
+    *وقت الحذف:* {datetime.now().strftime("%H:%M:%S")}
+    
+    يمكنك إضافة قناة جديدة في أي وقت.
+    """
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("➕ إضافة قناة جديدة", callback_data="add_channel"),
+            InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+        )
+    )
+    bot.answer_callback_query(call.id, "تم حذف القناة!")
+
+def handle_help(call):
+    """إصلاح: عرض المساعدة بشكل صحيح"""
+    user_id = call.from_user.id
+    
+    help_text = f"""
+    🎭 *بوت سُخام - دليل المستخدم*
+    
+    *المستخدم الحالي:* {user_id}
+    
+    *📌 النظام الجديد:*
+    1. *قناة واحدة لكل مستخدم:* يمكنك إضافة قناة واحدة فقط
+    2. *عبارات فورية:* توليد عبارات في الوقت الحقيقي
+    3. *نشر فوري:* نشر العبارة مباشرة في قناتك
+    4. *نشر تلقائي:* استمرار النشر المجدول
+    
+    *⚙️ كيفية الاستخدام:*
+    
+    1. *إضافة القناة:*
+       - اضغط على "قناتي" ثم "إضافة قناة"
+       - أرسل معرف القناة (مثال: @my_channel)
+       - تأكد أن البوت مدير في القناة
+    
+    2. *توليد العبارات:*
+       - اضغط على "توليد عبارة"
+       - سيتم إنشاء عبارة جديدة
+       - يمكنك توليد أخرى أو نشرها
+    
+    3. *النشر الفوري:*
+       - بعد توليد عبارة، اضغط "النشر في قناتي"
+       - سيتم نشرها فورًا في قناتك
+    
+    *⏰ النشر التلقائي:*
+    • 6:00 صباحًا
+    • 12:00 ظهرًا
+    • 18:00 مساءً
+    
+    *🎯 نظام منع التكرار:*
+    • يحول دون تكرار العبارات
+    • يتجنب المواضيع المتشابهة
+    • يحفظ بصمة لكل عبارة
+    
+    *⚠️ ملاحظات مهمة:*
+    • يمكنك حذف قناتك وإضافة قناة جديدة
+    • العبارات المؤقتة تُحفظ حتى تقوم بنشرها
+    • لا يمكن إضافة أكثر من قناة واحدة
+    
+    *🔗 روابط:*
+    • قناة البوت: @iIl337
+    • للمساعدة الفورية: تواصل مع المطور
+    """
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=help_text,
+        parse_mode='Markdown',
+        reply_markup=create_main_keyboard(user_id)
+    )
+    bot.answer_callback_query(call.id)
+
+def handle_stats(call):
+    user_id = call.from_user.id
+    
+    total_phrases = len(used_phrases)
+    unique_hashes = len(phrase_history)
+    total_topics = len(topic_history)
+    
+    sorted_topics = sorted(
+        topic_history.items(),
+        key=lambda x: x[1].get('count', 0),
+        reverse=True
+    )[:10]
+    
+    topics_text = "\n".join([
+        f"• {topic}: {data.get('count', 0)} مرة" 
+        for topic, data in sorted_topics[:5]
+    ])
+    
+    recent_phrases = list(used_phrases)[-5:]
+    recent_text = "\n".join([
+        f"{i+1}. {phrase[:30]}..." if len(phrase) > 30 else f"{i+1}. {phrase}"
+        for i, phrase in enumerate(recent_phrases)
+    ])
+    
+    stats_text = f"""
+    📊 *إحصائيات نظام منع التكرار*
+    
+    *عام:*
+    • العبارات المخزنة: {total_phrases}
+    • العبارات الفريدة: {unique_hashes}
+    • المواضيع المسجلة: {total_topics}
+    
+    *المواضيع الأكثر تكرارًا:*
+    {topics_text}
+    
+    *آخر العبارات:*
+    {recent_text}
+    
+    *نظام التشغيل:*
+    • حد التشابه: {repetition_preventer.similarity_threshold*100}%
+    • ساعات تبريد المواضيع: {repetition_preventer.topic_cooldown_hours}
+    • المحاولات القصوى: 10
+    """
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=stats_text,
+        parse_mode='Markdown',
+        reply_markup=create_main_keyboard(user_id)
+    )
+    bot.answer_callback_query(call.id)
+
+def handle_back_to_main(call):
+    user_id = call.from_user.id
+    
+    text = """
+    🎭 *بوت سُخام - القائمة الرئيسية*
+    
+    اختر الخيار المطلوب من الأزرار أدناه:
+    """
+    
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        parse_mode='Markdown',
+        reply_markup=create_main_keyboard(user_id)
+    )
+    bot.answer_callback_query(call.id)
+
+# ========== معالجة أمر الإلغاء ==========
+@bot.message_handler(commands=['cancel'])
+def handle_cancel(message):
+    user_id = message.from_user.id
+    
+    bot.send_message(
+        message.chat.id,
+        "تم إلغاء العملية الحالية.",
+        reply_markup=create_main_keyboard(user_id)
+    )
 
 # ========== جدولة النشر التلقائي ==========
 def get_unique_phrase():
@@ -796,25 +1359,19 @@ def scheduled_posting():
             time.sleep(60)
 
 # ========== إرسال الطلبات الدورية للويب هووك ==========
-def send_keep_alive():
-    """إرسال طلب كل 5 دقائق للحفاظ على نشاط البوت"""
-    def ping_webhook():
+def keep_alive_loop():
+    """إرسال طلبات دورية كل 5 دقائق للحفاظ على نشاط البوت"""
+    print(f"[{datetime.now()}] 🔄 Starting keep-alive loop...")
+    
+    while True:
         try:
             response = requests.get(WEBHOOK_URL, timeout=10)
             print(f"[{datetime.now()}] ✅ Pinged webhook - Status: {response.status_code}")
         except Exception as e:
             print(f"[{datetime.now()}] ❌ Failed to ping webhook: {e}")
-    
-    # تشغيل أول ping
-    ping_webhook()
-    
-    # جدولة ping كل 5 دقائق
-    while True:
-        schedule.every(5).minutes.do(ping_webhook)
         
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
+        # انتظار 5 دقائق
+        time.sleep(300)
 
 # ========== تشغيل البوت ==========
 def start_bot():
@@ -823,7 +1380,7 @@ def start_bot():
     scheduler_thread.start()
     
     # بدء خيط إرسال الطلبات الدورية
-    keep_alive_thread = threading.Thread(target=send_keep_alive, daemon=True)
+    keep_alive_thread = threading.Thread(target=keep_alive_loop, daemon=True)
     keep_alive_thread.start()
     
     print("=" * 50)
